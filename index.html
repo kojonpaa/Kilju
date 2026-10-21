@@ -21,11 +21,12 @@
         <p class="tagline">Huutaa vai kiljua?</p>
       </div>
       <div class="card">
-        <p>Tehtäväsi on valmistaa <strong>mahdollisimman vahvaa</strong> ja <strong>mahdollisimman herkullista</strong> kiljua 25 litran ämpärissä.</p>
-        <p>Valitse raaka-aineet, hiiva, sokerin määrä, lämpötilat ja puhtaus. Seuraa käymistä päivä päivältä ja päätä, milloin pullotat.</p>
+        <p>Tehtäväsi on valmistaa <strong>mahdollisimman vahvaa</strong> ja <strong>herkullista</strong> kiljua <strong>mahdollisimman halvalla</strong>.</p>
+        <p>Aloitat pienellä budjetilla. Myy onnistunut kilju ja käytä voitot seuraavaan erään. Osan voit juoda itse: rahaa ei tule, mutta opit ja saat taitopisteitä.</p>
       </div>
-      <div id="best-box" class="card best hidden"></div>
-      <button class="btn primary big" data-go="setup">Aloita</button>
+      <div id="save-box" class="card best hidden"></div>
+      <button class="btn primary big hidden" id="continue">Jatka peliä</button>
+      <button class="btn big" id="new-game">Uusi peli</button>
       <p class="fineprint">Peli on viihdettä. K-18 aihe – nauti vastuullisesti.</p>
     </section>
 
@@ -33,9 +34,13 @@
     <section id="screen-setup" class="screen">
       <header class="bar">
         <button class="btn ghost" data-go="start" aria-label="Takaisin">←</button>
-        <h2>Resepti</h2>
+        <h2>Erä <span id="batch-no">1</span></h2>
         <span></span>
       </header>
+      <div class="wallet">
+        <div><span>Kassa</span><b id="money">0 €</b></div>
+        <button class="btn" data-go="skills" id="skills-btn">🎓 Taidot</button>
+      </div>
 
       <div class="card">
         <h3>🍋 Hedelmät <small>(enintään 3)</small></h3>
@@ -89,6 +94,12 @@
           <input type="checkbox" id="airlock" checked>
           <span>Kansi ja ilmalukko (muuten pyyhe päälle)</span>
         </label>
+      </div>
+
+      <div class="card">
+        <h3>🧾 Kustannukset</h3>
+        <ul class="bill" id="bill"></ul>
+        <p class="hint" id="bill-hint"></p>
       </div>
 
       <button class="btn primary big sticky" id="start-brew">Pistä käymään! 🫧</button>
@@ -149,9 +160,10 @@
           <b id="s-amb">22 °C</b>
           <button class="btn round" id="amb-up" aria-label="Lämpimämmäksi">+</button>
         </div>
+        <p class="hint" id="energy"></p>
         <div class="actions">
           <button class="btn" id="stir">🥄 Sekoita</button>
-          <button class="btn" id="add-sugar">🍚 +0,5 kg sokeria</button>
+          <button class="btn" id="add-sugar">🍚 +0,5 kg sokeria <small id="sugar-price"></small></button>
           <button class="btn" id="speed">⏩ Nopeus 1×</button>
         </div>
       </div>
@@ -176,20 +188,61 @@
         <div class="meter"><span>Vahvuus</span><div><i id="m-abv"></i></div><b id="r-abv"></b></div>
         <div class="meter"><span>Maku</span><div><i id="m-taste"></i></div><b id="r-taste"></b></div>
         <div class="meter"><span>Kirkkaus</span><div><i id="m-clar"></i></div><b id="r-clar"></b></div>
+        <div class="meter"><span>Hinta-laatu</span><div><i id="m-eff"></i></div><b id="r-eff"></b></div>
         <p class="hint" id="r-meta"></p>
+        <p class="hint" id="r-cost"></p>
       </div>
+
+      <div class="card" id="split-card">
+        <h3>🍾 Mitä teet erällä?</h3>
+        <label class="slider">
+          <span>Juot itse <b id="drink-val"></b></span>
+          <input type="range" id="drink" min="0" max="25" step="1" value="5">
+        </label>
+        <div class="split">
+          <div><span>Myyntiin</span><b id="sell-l"></b><small id="sell-price"></small></div>
+          <div><span>Tulot</span><b id="sell-eur"></b><small id="sell-energy"></small></div>
+          <div><span>Kokemus</span><b id="drink-xp"></b><small>XP</small></div>
+        </div>
+        <button class="btn primary big" id="settle">💶 Tilitä erä</button>
+      </div>
+
+      <div class="card hidden" id="settle-card">
+        <h3 id="settle-title"></h3>
+        <ul class="bill" id="settle-list"></ul>
+        <p class="hint" id="settle-hint"></p>
+      </div>
+
       <div class="card">
         <h3>Tuomariston muistiinpanot</h3>
         <ul class="notes" id="r-notes"></ul>
       </div>
-      <div class="row">
+      <div class="row hidden" id="after-row">
         <button class="btn" id="share">📣 Jaa</button>
-        <button class="btn primary" data-go="setup">🔁 Uusi satsi</button>
+        <button class="btn" data-go="skills">🎓 Taidot</button>
+        <button class="btn primary wide" id="next-batch">🔁 Seuraava erä</button>
       </div>
+    </section>
+
+    <!-- Taitopuu -->
+    <section id="screen-skills" class="screen">
+      <header class="bar">
+        <button class="btn ghost" id="skills-back" aria-label="Takaisin">←</button>
+        <h2>Taidot</h2>
+        <span></span>
+      </header>
+      <div class="card">
+        <p>Taitopisteitä käytettävissä: <b id="points">0</b></p>
+        <div class="xpbar"><i id="xp-fill"></i></div>
+        <p class="hint" id="xp-text"></p>
+        <p class="hint">Kokemusta saa juomalla omaa kiljua. Mitä vahvempaa ja herkullisempaa, sitä enemmän opit.</p>
+      </div>
+      <div class="tree" id="tree"></div>
     </section>
 
   </main>
   <script src="js/sim.js"></script>
+  <script src="js/economy.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

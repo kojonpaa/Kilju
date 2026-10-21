@@ -7,6 +7,7 @@
 
   var VOLUME_L = 25;
   var G_PER_ABV = 17; // g/L sokeria yhtä tilavuusprosenttia kohden
+  var ENERGY_EUR_PER_DEG_DAY = 0.015;
 
   var FRUITS = {
     sitruuna:  { name: 'Sitruuna',       emoji: '🍋', sugar: 2,  nutrient: 0.05, acid: 0.30, flavor: 8,  color: [250, 240, 160] },
@@ -83,8 +84,19 @@
    *   cleaning: 'desinf', airlock: bool, seed: number
    * }
    */
-  function createBatch(recipe) {
+  /*
+   * mods: taitopuun vaikutukset, esim. { infection: 0.7, fusel: 0.8, tol: 1, taste: 3, clarity: 1.3 }
+   */
+  function createBatch(recipe, mods) {
     var y = YEASTS[recipe.yeast];
+    mods = mods || {};
+    mods = {
+      infection: mods.infection === undefined ? 1 : mods.infection,
+      fusel: mods.fusel === undefined ? 1 : mods.fusel,
+      tol: mods.tol || 0,
+      taste: mods.taste || 0,
+      clarity: mods.clarity || 1
+    };
     var fruitSugar = 0, nutrient = 0.5 + y.nutrient + (recipe.nutrient ? 0.45 : 0);
     recipe.fruits.forEach(function (f) { fruitSugar += FRUITS[f].sugar; nutrient += FRUITS[f].nutrient; });
     nutrient = clamp(nutrient, 0.2, 1.3);
@@ -110,7 +122,10 @@
       nutrient: nutrient,
       capacity: clamp(nutrient, 0.25, 1.1),
       fusel: 0,
-      infection: (1 - clean) * 0.03 * (recipe.airlock ? 1 : 2) + 0.0005,
+      infection: ((1 - clean) * 0.03 * (recipe.airlock ? 1 : 2) + 0.0005) * mods.infection,
+      mods: mods,
+      tol: y.tol + mods.tol,
+      energyCost: 0,
       oxidation: 0,
       restHours: 0,
       stirs: 0,
@@ -149,7 +164,7 @@
     var y = b.yeast;
     var T = b.temp;
     var tf = tempFactor(y, T);
-    var alcFactor = Math.sqrt(clamp(1 - b.abv / y.tol, 0, 1));
+    var alcFactor = Math.sqrt(clamp(1 - b.abv / b.tol, 0, 1));
     var sugarFactor = b.sugar / (b.sugar + 6);
     var osmotic = b.sugar > 300 ? clamp(1 - (b.sugar - 300) / 250, 0.15, 1) : 1;
     var nutFactor = clamp(0.4 + b.nutrient * 0.6, 0.4, 1.2);
@@ -161,7 +176,7 @@
 
     // Sokerin syönti
     var activity = b.cells * tf * alcFactor * sugarFactor * osmotic * nutFactor;
-    var eaten = Math.min(b.sugar, 2.2 * activity);
+    var eaten = Math.min(b.sugar, 2.8 * activity);
     b.sugar -= eaten;
     b.abv += eaten / G_PER_ABV;
     b.activity = activity;
@@ -172,20 +187,23 @@
     if (b.temp > b.peakTemp) b.peakTemp = b.temp;
 
     // Liian lämmin käyminen = fuseliöljyjä ja liuotinmakua
-    if (T > y.clean) b.fusel += activity * (T - y.clean) * 0.0025;
+    if (T > y.clean) b.fusel += activity * (T - y.clean) * 0.0025 * b.mods.fusel;
     // Hapekas ja ravinneköyhä käyminen stressaa myös hiivaa
     if (b.nutrient < 0.4) b.fusel += activity * 0.0008;
 
     // Bakteerit ja villihiivat: menestyvät kun hiivaa on vähän ja alkoholia vähän
-    var protect = clamp(1 - b.abv / 9, 0, 1) / (1 + 6 * b.cells);
+    var protect = clamp(1 - b.abv / 9, 0, 1) / (1 + 10 * b.cells);
     var airlock = b.recipe.airlock ? 1 : 1.8;
     var warmth = clamp((T - 5) / 20, 0.1, 1.5);
-    b.infection += 0.06 * b.infection * (1 - b.infection) * protect * airlock * warmth;
+    b.infection += 0.035 * b.infection * (1 - b.infection) * protect * airlock * warmth * b.mods.infection;
     if (!b.recipe.airlock && b.activity < 0.05) b.oxidation += 0.0015;
 
     // Käymisen jälkeen hiiva laskeutuu ja alkaa vähitellen hajota
     if (activity < 0.03 && b.hour > 24) b.restHours += 1;
     else b.restHours = Math.max(0, b.restHours - 2);
+
+    // Lämmitys tai jäähdytys poikkeamana normaalista 18 asteen huoneesta maksaa sähköä
+    b.energyCost += Math.abs(b.ambient - 18) * ENERGY_EUR_PER_DEG_DAY / 24;
 
     b.hour += 1;
     events(b);
@@ -200,7 +218,7 @@
     if (!f.boil && b.temp > 40) { f.boil = 1; addEvent(b, 'bad', 'Yli 40 °C! Hiivat alkavat kuolla.'); }
     if (!f.infect && b.infection > 0.08) { f.infect = 1; addEvent(b, 'bad', 'Pinnalla kelluu epäilyttävä kalvo ja haistuu etikka...'); }
     if (!f.flies && b.infection > 0.03 && !b.recipe.airlock) { f.flies = 1; addEvent(b, 'warn', 'Banaanikärpäsiä parveilee ämpärin ympärillä.'); }
-    if (!f.tol && b.abv > b.yeast.tol * 0.95 && b.sugar > 10) {
+    if (!f.tol && b.abv > b.tol * 0.95 && b.sugar > 10) {
       f.tol = 1; addEvent(b, 'warn', 'Hiiva väsyy alkoholiin (' + b.abv.toFixed(1) + ' %). Sokeria jää käymättä.');
     }
     if (!f.dry && b.sugar < 3 && b.abv > 2) { f.dry = 1; addEvent(b, 'good', 'Sokerit on syöty loppuun. Kilju alkaa kirkastua.'); }
@@ -245,7 +263,8 @@
   }
 
   /* Lopputuloksen arviointi */
-  function evaluate(b) {
+  /* cost: erän kokonaiskustannus euroina (valinnainen). Hinta-laatu lasketaan alkoholilitran hinnasta. */
+  function evaluate(b, cost) {
     var r = b.recipe, y = b.yeast;
     var notes = [];
     var taste = 50;
@@ -286,7 +305,7 @@
     if (r.spices.indexOf('chili') >= 0) notes.push({ kind: 'info', text: 'Chili polttaa kurkussa. Rohkea valinta.' });
 
     // Hiivan oma luonne
-    taste += y.base;
+    taste += y.base + b.mods.taste;
     if (y.base <= -8) notes.push({ kind: 'warn', text: y.name + ' jättää leipäisen sivumaun.' });
 
     // Makeus ja happo
@@ -338,7 +357,7 @@
     taste -= autolysis;
 
     // Kirkkaus
-    var clarity = clamp((b.restHours / 24) / 5, 0, 1) * y.floc + (b.activity < 0.03 ? 0.1 : 0);
+    var clarity = clamp((b.restHours / 24) / 5 * b.mods.clarity, 0, 1) * y.floc + (b.activity < 0.03 ? 0.1 : 0);
     clarity = clamp(clarity, 0, 1);
     taste += clarity * 8;
     if (clarity < 0.3) notes.push({ kind: 'info', text: 'Sameaa kuin lätäkkövesi. Odota muutama päivä käymisen jälkeen, niin kilju kirkastuu.' });
@@ -352,8 +371,16 @@
     }
 
     taste = clamp(Math.round(taste), 0, 100);
-    var abvScore = clamp(b.abv / 18, 0, 1.05) * 50;
-    var score = Math.round(clamp(abvScore + taste * 0.5, 0, 100));
+    // Pisteet: vahvuus 40, maku 40, hinta-laatu 20
+    var alcLitres = VOLUME_L * b.abv / 100;
+    var costPerAlcL = cost === undefined ? null : (alcLitres > 0.05 ? cost / alcLitres : Infinity);
+    var efficiency = costPerAlcL === null ? 0.5 : clamp((15 - costPerAlcL) / 12, 0, 1);
+    var abvScore = clamp(b.abv / 18, 0, 1.05) * 40;
+    var score = Math.round(clamp(abvScore + taste * 0.4 + efficiency * 20, 0, 100));
+    if (costPerAlcL !== null && isFinite(costPerAlcL)) {
+      if (efficiency > 0.75) notes.push({ kind: 'good', text: 'Edullista: alkoholilitra maksoi vain ' + costPerAlcL.toFixed(2).replace('.', ',') + ' €.' });
+      else if (efficiency < 0.3) notes.push({ kind: 'warn', text: 'Kallis erä: alkoholilitra maksoi ' + costPerAlcL.toFixed(2).replace('.', ',') + ' €.' });
+    }
 
     return {
       abv: Math.round(b.abv * 10) / 10,
@@ -361,6 +388,9 @@
       taste: taste,
       clarity: clarity,
       score: score,
+      efficiency: efficiency,
+      costPerAlcL: costPerAlcL,
+      alcLitres: alcLitres,
       title: titleFor(score, b, taste),
       notes: notes,
       days: Math.round(b.hour / 24),
